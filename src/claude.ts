@@ -5,12 +5,17 @@ import type {
   ContentBlock,
 } from "@anthropic-ai/sdk/resources";
 import { githubTools, executeTool } from "./github.js";
+import { subscriptionTools, executeSubscriptionTool } from "./subscriptionTools.js";
 import { getHistory, addMessage, getSystemPrompt } from "./memory.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL = "claude-sonnet-4-6";
-const DEFAULT_SYSTEM = `You are a helpful AI assistant accessible via Telegram. You have access to GitHub tools that let you read repos, browse files, create/update files, and manage branches. Use these tools proactively when the user asks about their code or wants to make changes to a repo. Be concise and clear in your responses.`;
+const DEFAULT_SYSTEM = `You are a helpful AI assistant accessible via Telegram. You have access to:
+- GitHub tools: read repos, browse files, create/update files, manage branches and pull requests
+- Subscription tools: add, list, update, delete subscriptions and get cost summaries and upcoming renewals
+
+Use these tools proactively when relevant. For subscriptions, always confirm after adding or deleting. Format subscription lists and cost summaries clearly. Be concise and clear in your responses.`;
 
 // Called with a streaming update callback so the bot can edit the message in real time
 export async function chat(
@@ -37,7 +42,7 @@ export async function chat(
       model: MODEL,
       max_tokens: 4096,
       system: systemPrompt,
-      tools: githubTools,
+      tools: [...githubTools, ...subscriptionTools],
       messages: history,
     });
 
@@ -118,10 +123,17 @@ export async function chat(
       await onPartialText(
         accumulatedText + `\n\n_Using tool: \`${toolUse.name}\`..._`
       );
-      const result = await executeTool(
+      const subResult = await executeSubscriptionTool(
+        chatId,
         toolUse.name,
-        toolUse.input as Record<string, string | undefined>
+        toolUse.input as Record<string, unknown>
       );
+      const result =
+        subResult ??
+        (await executeTool(
+          toolUse.name,
+          toolUse.input as Record<string, string | undefined>
+        ));
       toolResults.push({
         type: "tool_result",
         tool_use_id: toolUse.id,

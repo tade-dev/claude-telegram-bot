@@ -1,0 +1,147 @@
+import { promises as fs } from "fs";
+import { randomUUID } from "crypto";
+import path from "path";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const SUBS_FILE = path.join(DATA_DIR, "subscriptions.json");
+
+export type BillingCycle = "weekly" | "monthly" | "yearly";
+
+export interface Subscription {
+  id: string;
+  chatId: number;
+  name: string;
+  amount: number;
+  currency: string;
+  billingCycle: BillingCycle;
+  renewalDate: string; // ISO date "YYYY-MM-DD"
+  category: string;
+  notes?: string;
+  createdAt: string;
+}
+
+interface SubStore {
+  subscriptions: Subscription[];
+}
+
+async function ensureDataDir(): Promise<void> {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+}
+
+async function readStore(): Promise<SubStore> {
+  try {
+    const raw = await fs.readFile(SUBS_FILE, "utf-8");
+    return JSON.parse(raw) as SubStore;
+  } catch {
+    return { subscriptions: [] };
+  }
+}
+
+async function writeStore(store: SubStore): Promise<void> {
+  await ensureDataDir();
+  await fs.writeFile(SUBS_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+
+/** Convert any amount to a monthly equivalent for cost summaries */
+export function toMonthlyAmount(amount: number, cycle: BillingCycle): number {
+  if (cycle === "weekly") return amount * 52 / 12;
+  if (cycle === "yearly") return amount / 12;
+  return amount;
+}
+
+export async function addSubscription(
+  chatId: number,
+  name: string,
+  amount: number,
+  currency: string,
+  billingCycle: BillingCycle,
+  renewalDate: string,
+  category: string,
+  notes?: string
+): Promise<Subscription> {
+  const store = await readStore();
+  const sub: Subscription = {
+    id: randomUUID(),
+    chatId,
+    name: name.trim(),
+    amount,
+    currency: currency.toUpperCase(),
+    billingCycle,
+    renewalDate,
+    category: category.toLowerCase().trim(),
+    notes: notes?.trim(),
+    createdAt: new Date().toISOString(),
+  };
+  store.subscriptions.push(sub);
+  await writeStore(store);
+  return sub;
+}
+
+export async function listSubscriptions(
+  chatId: number,
+  category?: string
+): Promise<Subscription[]> {
+  const store = await readStore();
+  let subs = store.subscriptions.filter((s) => s.chatId === chatId);
+  if (category)
+    subs = subs.filter((s) =>
+      s.category.includes(category.toLowerCase().trim())
+    );
+  subs.sort((a, b) => a.name.localeCompare(b.name));
+  return subs;
+}
+
+export async function getUpcomingRenewals(
+  chatId: number,
+  withinDays: number = 7
+): Promise<Subscription[]> {
+  const subs = await listSubscriptions(chatId);
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + withinDays * 24 * 60 * 60 * 1000);
+  return subs.filter((s) => {
+    const d = new Date(s.renewalDate);
+    return d >= now && d <= cutoff;
+  }).sort((a, b) => new Date(a.renewalDate).getTime() - new Date(b.renewalDate).getTime());
+}
+
+export async function getCostSummary(
+  chatId: number
+): Promise<{ monthlyTotal: number; yearlyTotal: number; currency: string; count: number }> {
+  const subs = await listSubscriptions(chatId);
+  const monthlyTotal = subs.reduce(
+    (sum, s) => sum + toMonthlyAmount(s.amount, s.billingCycle),
+    0
+  );
+  // Use the most common currency, fallback to USD
+  const currencyCounts: Record<string, number> = {};
+  for (const s of subs) currencyCounts[s.currency] = (currencyCounts[s.currency] ?? 0) + 1;
+  const currency = Object.entries(currencyCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "USD";
+  return { monthlyTotal, yearlyTotal: monthlyTotal * 12, currency, count: subs.length };
+}
+
+export async function deleteSubscription(
+  chatId: number,
+  id: string
+): Promise<boolean> {
+  const store = await readStore();
+  const before = store.subscriptions.length;
+  store.subscriptions = store.subscriptions.filter(
+    (s) => !(s.id === id && s.chatId === chatId)
+  );
+  if (store.subscriptions.length === before) return false;
+  await writeStore(store);
+  return true;
+}
+
+export async function updateSubscription(
+  chatId: number,
+  id: string,
+  updates: Partial<Pick<Subscription, "name" | "amount" | "currency" | "billingCycle" | "renewalDate" | "category" | "notes">>
+): Promise<Subscription | null> {
+  const store = await readStore();
+  const sub = store.subscriptions.find((s) => s.id === id && s.chatId === chatId);
+  if (!sub) return null;
+  Object.assign(sub, updates);
+  await writeStore(store);
+  return sub;
+}

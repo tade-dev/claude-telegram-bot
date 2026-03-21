@@ -5,6 +5,7 @@ import { helpCommand } from "./commands/help.js";
 import { systemCommand } from "./commands/system.js";
 import { resetCommand } from "./commands/reset.js";
 import { reposCommand } from "./commands/repos.js";
+import { subsCommand } from "./commands/subs.js";
 
 export function createBot(token: string): Telegraf {
   const bot = new Telegraf(token);
@@ -15,6 +16,7 @@ export function createBot(token: string): Telegraf {
   bot.command("system", systemCommand);
   bot.command("reset", resetCommand);
   bot.command("repos", reposCommand);
+  bot.command("subs", subsCommand);
 
   // Handle all text messages
   bot.on("text", async (ctx) => {
