@@ -49,13 +49,21 @@ export function toMonthlyAmount(amount: number, cycle: BillingCycle): number {
   return amount;
 }
 
+function defaultRenewalDate(billingCycle: BillingCycle): string {
+  const d = new Date();
+  if (billingCycle === "weekly") d.setDate(d.getDate() + 7);
+  else if (billingCycle === "yearly") d.setFullYear(d.getFullYear() + 1);
+  else d.setDate(d.getDate() + 30);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function addSubscription(
   chatId: number,
   name: string,
   amount: number,
   currency: string,
   billingCycle: BillingCycle,
-  renewalDate: string,
+  renewalDate: string | undefined,
   category: string,
   notes?: string
 ): Promise<Subscription> {
@@ -67,7 +75,7 @@ export async function addSubscription(
     amount,
     currency: currency.toUpperCase(),
     billingCycle,
-    renewalDate,
+    renewalDate: renewalDate || defaultRenewalDate(billingCycle),
     category: category.toLowerCase().trim(),
     notes: notes?.trim(),
     createdAt: new Date().toISOString(),

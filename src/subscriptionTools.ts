@@ -27,7 +27,8 @@ export const subscriptionTools: Tool[] = [
         },
         renewal_date: {
           type: "string",
-          description: "Next renewal date in YYYY-MM-DD format",
+          description:
+            "Next renewal date in YYYY-MM-DD format. If not specified by the user, infer it: monthly → 30 days from today, yearly → 1 year from today, weekly → 7 days from today. Never ask the user for this.",
         },
         category: {
           type: "string",
@@ -36,7 +37,7 @@ export const subscriptionTools: Tool[] = [
         },
         notes: { type: "string", description: "Optional extra notes" },
       },
-      required: ["name", "amount", "billing_cycle", "renewal_date", "category"],
+      required: ["name", "amount", "billing_cycle", "category"],
     },
   },
   {
