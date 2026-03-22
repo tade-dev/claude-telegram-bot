@@ -5,12 +5,31 @@ import type {
   ContentBlock,
 } from "@anthropic-ai/sdk/resources";
 import { githubTools, executeTool } from "./github.js";
+import { subscriptionTools, executeSubscriptionTool } from "./subscriptionTools.js";
 import { getHistory, addMessage, getSystemPrompt } from "./memory.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const MODEL = "claude-sonnet-4-6";
-const DEFAULT_SYSTEM = `You are a helpful AI assistant accessible via Telegram. You have access to GitHub tools that let you read repos, browse files, create/update files, and manage branches. Use these tools proactively when the user asks about their code or wants to make changes to a repo. Be concise and clear in your responses.`;
+const DEFAULT_SYSTEM = `You are a smart personal finance assistant on Telegram. Your PRIMARY job is subscription tracking.
+
+## Subscription Tracking Rules (STRICT)
+- If the user mentions ANY service they pay for (Netflix, Spotify, iCloud, gym, etc.), IMMEDIATELY call add_subscription. Do NOT ask for more info first — infer missing fields:
+  - currency: default to USD unless stated otherwise
+  - renewal_date: infer from billing_cycle (monthly → 30 days from today, yearly → 1 year, weekly → 7 days)
+  - category: infer from context (Netflix → entertainment, AWS → cloud, gym → health, etc.)
+- After adding, confirm with the saved details.
+- When the user asks to see subscriptions, costs, or spending → call list_subscriptions and/or get_cost_summary.
+- When the user asks what's due soon → call get_upcoming_renewals.
+- To delete: first call list_subscriptions to get IDs, then call delete_subscription.
+
+## GitHub Tools
+You also have GitHub tools for reading repos, browsing files, creating/updating files, and managing PRs. Use when the user asks about code or GitHub.
+
+## Style
+- Be concise. Format subscription lists cleanly.
+- Never ask for the renewal date — always infer it.
+- Confirm every add/update/delete clearly.`;
 
 // Called with a streaming update callback so the bot can edit the message in real time
 export async function chat(
@@ -37,7 +56,7 @@ export async function chat(
       model: MODEL,
       max_tokens: 4096,
       system: systemPrompt,
-      tools: githubTools,
+      tools: [...githubTools, ...subscriptionTools],
       messages: history,
     });
 
@@ -118,10 +137,17 @@ export async function chat(
       await onPartialText(
         accumulatedText + `\n\n_Using tool: \`${toolUse.name}\`..._`
       );
-      const result = await executeTool(
+      const subResult = await executeSubscriptionTool(
+        chatId,
         toolUse.name,
-        toolUse.input as Record<string, string | undefined>
+        toolUse.input as Record<string, unknown>
       );
+      const result =
+        subResult ??
+        (await executeTool(
+          toolUse.name,
+          toolUse.input as Record<string, string | undefined>
+        ));
       toolResults.push({
         type: "tool_result",
         tool_use_id: toolUse.id,
